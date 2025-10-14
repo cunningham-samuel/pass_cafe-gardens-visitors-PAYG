@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Find Your Pass</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 0; background:#f5f5f5; }
+    .wrap { max-width: 720px; margin: 4rem auto; background: #fff; padding: 1.5rem; border-radius: 16px; box-shadow: 0 2px 10px rgba(0,0,0,.06); }
+    h1 { margin: 0 0 1rem; font-weight: 700; font-size: 1.75rem; color: #2a2a2a; }
+    label { display:block; margin:.75rem 0 .25rem; }
+    input[type="text"]{ width:100%; padding:.75rem; border:1px solid #ccc; border-radius:10px; font-size:1rem; }
+    .row { display:flex; gap:.75rem; align-items:center; margin:.25rem 0 1rem; }
+    select, button { padding:.7rem .9rem; border-radius:10px; border:1px solid #ccc; font-size:1rem; }
+    button { background:#4F615C; color:#fff; border-color:#4F615C; cursor:pointer; }
+    button:disabled { opacity:.6; cursor:not-allowed; }
+    .results { margin-top: 1rem; }
+    .card { border:1px solid #e3e3e3; border-radius:12px; padding:.75rem 1rem; margin:.5rem 0; display:flex; justify-content:space-between; align-items:center; }
+    .muted { color:#666; font-size:.9rem; }
+    .small { font-size:.85rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Look up your pass</h1>
+    <div class="row">
+      <label for="type" class="small">I am a…</label>
+      <select id="type">
+        <option value="visitor">Visitor</option>
+        <option value="coworker">Coworker</option>
+      </select>
+    </div>
+
+    <label for="name">Your name</label>
+    <input id="name" type="text" placeholder="e.g. Jane Doe" />
+
+    <div class="row">
+      <button id="search">Search</button>
+      <span id="msg" class="muted"></span>
+    </div>
+
+    <div id="results" class="results"></div>
+  </div>
+
+<script>
+  const $ = sel => document.querySelector(sel);
+
+  $('#search').addEventListener('click', async () => {
+    const type = $('#type').value;
+    const name = $('#name').value.trim();
+    $('#msg').textContent = '';
+    $('#results').innerHTML = '';
+
+    if (!name) { $('#msg').textContent = 'Please enter a name.'; return; }
+
+    $('#search').disabled = true;
+    $('#msg').textContent = 'Searching…';
+
+    try {
+      const res = await fetch(`/api/search?type=${encodeURIComponent(type)}&name=${encodeURIComponent(name)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Search failed');
+
+      if (!data.results.length) {
+        $('#msg').textContent = 'No matches. Try another name.';
+        return;
+      }
+
+      $('#msg').textContent = `Found ${data.results.length} match(es). Choose one:`;
+      data.results.forEach(r => {
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.innerHTML = `
+          <div>
+            <div><strong>${r.label}</strong></div>
+            <div class="muted small">${r.sub || ''}</div>
+          </div>
+          <button data-id="${r.id}" data-type="${type}">Select</button>
+        `;
+        div.querySelector('button').addEventListener('click', () => {
+          // send to pass.html with type & id
+          window.location.href = `/pass.html?type=${type}&id=${encodeURIComponent(r.id)}`;
+        });
+        $('#results').appendChild(div);
+      });
+    } catch (e) {
+      console.error(e);
+      $('#msg').textContent = e.message;
+    } finally {
+      $('#search').disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
