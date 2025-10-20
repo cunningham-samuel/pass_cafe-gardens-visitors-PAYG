@@ -14,17 +14,14 @@
     select, button { padding:.7rem .9rem; border-radius:10px; border:1px solid #ccc; font-size:1rem; }
     button { background:#4F615C; color:#fff; border-color:#4F615C; cursor:pointer; }
     button:disabled { opacity:.6; cursor:not-allowed; }
-    .results { margin-top: 1rem; }
-    .card { border:1px solid #e3e3e3; border-radius:12px; padding:.75rem 1rem; margin:.5rem 0; display:flex; justify-content:space-between; align-items:center; }
     .muted { color:#666; font-size:.9rem; }
-    .small { font-size:.85rem; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>Look up your pass</h1>
     <div class="row">
-      <label for="type" class="small">I am a…</label>
+      <label for="type" class="muted">I am a…</label>
       <select id="type">
         <option value="visitor">Visitor</option>
         <option value="coworker">Coworker</option>
@@ -35,61 +32,30 @@
     <input id="name" type="text" placeholder="e.g. Jane Doe" />
 
     <div class="row">
-      <button id="search">Search</button>
+      <button id="search">Show pass</button>
       <span id="msg" class="muted"></span>
     </div>
-
-    <div id="results" class="results"></div>
   </div>
 
 <script>
   const $ = sel => document.querySelector(sel);
 
-  $('#search').addEventListener('click', async () => {
+  $('#search').addEventListener('click', (e) => {
+    e.preventDefault();
     const type = $('#type').value;
     const name = $('#name').value.trim();
     $('#msg').textContent = '';
-    $('#results').innerHTML = '';
 
     if (!name) { $('#msg').textContent = 'Please enter a name.'; return; }
 
-    $('#search').disabled = true;
-    $('#msg').textContent = 'Searching…';
+    const params = new URLSearchParams({ type });
+    if (type === 'visitor') params.set('visitorName', name);
+    else params.set('coworkerName', name);
 
-    try {
-      const res = await fetch(`/api/search?type=${encodeURIComponent(type)}&name=${encodeURIComponent(name)}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Search failed');
-
-      if (!data.results.length) {
-        $('#msg').textContent = 'No matches. Try another name.';
-        return;
-      }
-
-      $('#msg').textContent = `Found ${data.results.length} match(es). Choose one:`;
-      data.results.forEach(r => {
-        const div = document.createElement('div');
-        div.className = 'card';
-        div.innerHTML = `
-          <div>
-            <div><strong>${r.label}</strong></div>
-            <div class="muted small">${r.sub || ''}</div>
-          </div>
-          <button data-id="${r.id}" data-type="${type}">Select</button>
-        `;
-        div.querySelector('button').addEventListener('click', () => {
-          // send to pass.html with type & id
-          window.location.href = `/pass.html?type=${type}&id=${encodeURIComponent(r.id)}`;
-        });
-        $('#results').appendChild(div);
-      });
-    } catch (e) {
-      console.error(e);
-      $('#msg').textContent = e.message;
-    } finally {
-      $('#search').disabled = false;
-    }
+    // Navigate to pass page which will call /api/get-pass
+    window.location.href = `/pass.html?${params.toString()}`;
   });
 </script>
 </body>
 </html>
+
