@@ -6,20 +6,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root{
-      --card-max-w: 380px;     /* upper bound on large screens */
-      --card-min-w: 300px;     /* lower bound so it doesn't shrink too far */
+      --card-max-w: 380px;
+      --card-min-w: 300px;
       --radius: 18px;
       --pad: 16px;
     }
-
-    html, body { height:100%; margin:0; background:#f5f5f5; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color:#222; }
+    html, body { height:100%; margin:0; background:#f5f5f5; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
     .container { height:100%; display:grid; place-items:center; padding:16px; }
-
-    /* Playing-card shell */
     .card {
       width: clamp(var(--card-min-w), 92vw, var(--card-max-w));
-      aspect-ratio: 85.6 / 54;                /* credit-card-ish */
-      box-sizing: border-box;
+      aspect-ratio: 85.6 / 54;
       border: 1px solid #dcdcdc;
       border-radius: var(--radius);
       background: #fff;
@@ -29,41 +25,17 @@
       box-shadow: 0 6px 20px rgba(0,0,0,.08);
       text-align: left;
     }
-
     .card.active   { background: #4F615C; color: #fff; border-color:#4F615C; }
-    .card.inactive { background: #fff;    color: #222; }
-
+    .card.inactive { background: #fff; color: #222; }
     .section { padding: var(--pad); }
-    .title {
-      text-align:center;
-      font-weight: 700;
-      line-height: 1.15;
-      font-size: clamp(18px, 3.6vw, 24px);
-    }
-    .subhead {
-      text-align:center;
-      margin: 6px 0 8px;
-      font-weight: 600;
-      font-size: clamp(13px, 2.8vw, 16px);
-      opacity: .95;
-    }
-
-    .row {
-      display:flex; justify-content:space-between; gap:10px;
-      margin: 4px 0;
-      font-size: clamp(12px, 2.6vw, 15px);
-    }
+    .title   { text-align:center; font-weight:700; line-height:1.15; font-size: clamp(18px, 3.6vw, 24px); }
+    .subhead { text-align:center; margin: 6px 0 10px; font-weight:600; font-size: clamp(13px, 2.8vw, 16px); }
+    .row { display:flex; justify-content:space-between; gap:10px; margin: 6px 0; font-size: clamp(12px, 2.6vw, 15px); }
     .row strong { font-weight:700; }
     .details { overflow: hidden; }
     .details-inner { height: 100%; overflow:auto; padding: 0 var(--pad); }
-    .spacer { height: 6px; }
-
     .media { overflow:hidden; border-bottom-left-radius: var(--radius); border-bottom-right-radius: var(--radius); }
     .media img { width:100%; height:100%; object-fit:cover; display:block; }
-
-    @media (max-width: 420px){
-      :root { --pad: 14px; --radius: 16px; }
-    }
   </style>
 </head>
 <body>
@@ -78,12 +50,47 @@
   const type = params.get('type');   // "visitor" | "coworker"
   const id   = params.get('id');
 
-  const $ = (sel) => document.querySelector(sel);
+  const $ = sel => document.querySelector(sel);
 
   function fmt(dt) {
     if (!dt) return 'N/A';
     const d = new Date(dt), pad = n => String(n).padStart(2,'0');
     return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function normalizePass(input) {
+    // Accept your unified 'pass' or a raw booking/visitor object
+    if (!input) return null;
+
+    // If API returned { pass: {...} } already
+    const p = ('name' in input || 'resource' in input || 'fromTime' in input || 'toTime' in input)
+      ? input
+      : input; // fallback: use input directly
+
+    const name =
+      p.name ??
+      p.CoworkerFullName ??
+      p.FullName ??
+      null;
+
+    const resource =
+      p.resource ??
+      p.ResourceName ??
+      (p.CustomFields?.Data?.find?.(x => x.Name === 'Nexudus.Booking.ResourceName')?.Value) ??
+      null;
+
+    const fromTime =
+      p.fromTime ??
+      p.FromTime ??
+      (p.CustomFields?.Data?.find?.(x => x.Name === 'Nexudus.Booking.FromTime')?.Value) ??
+      null;
+
+    const toTime =
+      p.toTime ??
+      p.ToTime ??
+      null;
+
+    return { name, resource, fromTime, toTime };
   }
 
   function renderInactive(msg){
@@ -108,12 +115,11 @@
       </div>
       <div class="details">
         <div class="details-inner">
-          <div class="subhead">Booking Details</div>
+          <div class="subhead">Booking Details:</div>
           <div class="row"><strong>Name:</strong><span>${pass.name || 'N/A'}</span></div>
           <div class="row"><strong>Resource:</strong><span>${pass.resource || 'N/A'}</span></div>
           <div class="row"><strong>Start:</strong><span>${fmt(pass.fromTime)}</span></div>
           <div class="row"><strong>End:</strong><span>${fmt(pass.toTime)}</span></div>
-          <div class="spacer"></div>
         </div>
       </div>
       <div class="media">
@@ -130,7 +136,14 @@
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load pass');
 
-      const pass = data.pass; // { name, resource, fromTime, toTime }
+      // Prefer unified pass, otherwise try bookings[0]/visitor etc.
+      let raw =
+        data.pass ??
+        (Array.isArray(data.bookings) && data.bookings[0]) ??
+        data.visitor ??
+        null;
+
+      const pass = normalizePass(raw);
       if (!pass) { renderInactive('No Current Booking'); return; }
 
       renderActive(pass);
