@@ -9,12 +9,9 @@
     .container { height:100%; display:flex; justify-content:center; align-items:center; }
     .card { border:1px solid #ccc; border-radius:20px; padding:20px; width:70vw; max-width:2000px; box-sizing:border-box; text-align:center; }
     .active { background:#4F615C; border-color:#4F615C; color:#fff; }
-    .inactive { background:#fff; border-color:#ccc; color:#333; }
     h3 { font-size:6vw; margin:10px 0; }
-    h4 { font-size:4vw; margin:15px 0 10px; }
-    p  { font-size:4vw; margin:8px 0; }
+    h4, p { font-size:4vw; margin:12px 0; }
     img { width:100%; border-radius:15px; margin-top:25px; }
-    .small { font-size:3.2vw; opacity:.9; }
   </style>
 </head>
 <body>
@@ -24,119 +21,44 @@
 
 <script>
   const params = new URLSearchParams(location.search);
-  const type = params.get('type');         // "visitor" | "coworker"
-  const id   = params.get('id');           // optional legacy numeric id
-  const visitorName  = params.get('visitorName');
-  const coworkerName = params.get('coworkerName');
+  const type = params.get('type');   // "visitor" | "coworker"
+  const id   = params.get('id');
 
-  const cardEl = document.getElementById('card');
-
-  function fmt(dt) {
+  const fmt = dt => {
     const d = new Date(dt), pad = n => String(n).padStart(2,'0');
     return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
+  };
 
-  function renderInactive(msg = 'No Current Pass') {
-    cardEl.innerHTML = `<div class="card inactive"><h3>${msg}</h3></div>`;
-  }
-
-  function renderCoworkerActive(b) {
-    cardEl.innerHTML = `
-      <div class="card active">
-        <h3>Garden & Café Pass Active</h3>
-        <h4>Booking Details:</h4>
-        <p><strong>Name:</strong> ${b.CoworkerFullName || 'N/A'}</p>
-        <p><strong>Resource:</strong> ${b.ResourceName || 'N/A'}</p>
-        <p><strong>Start:</strong> ${fmt(b.FromTime)}</p>
-        <p><strong>End:</strong> ${fmt(b.ToTime)}</p>
-        <img src="assets/images/coffee-in-plants.jpeg" alt="Coffee" />
-      </div>
-    `;
-  }
-
-  function renderVisitorActive(v, b) {
-    cardEl.innerHTML = `
-      <div class="card active">
-        <h3>Visitor Pass Active</h3>
-        <h4>Visit Details:</h4>
-        <p><strong>Visitor:</strong> ${v.VisitorFullName || v.FullName || 'N/A'}</p>
-        <p><strong>Host:</strong> ${b?.CoworkerFullName || 'N/A'}</p>
-        ${b ? `<p><strong>Resource:</strong> ${b.ResourceName || 'N/A'}</p>` : ''}
-        ${b ? `<p><strong>Start:</strong> ${fmt(b.FromTime)}</p>` : ''}
-        ${b ? `<p><strong>End:</strong> ${fmt(b.ToTime)}</p>` : ''}
-        ${v?.VisitorCode ? `<p class="small"><strong>Code:</strong> ${v.VisitorCode}</p>` : ''}
-        <img src="assets/images/coffee-in-plants.jpeg" alt="Coffee" />
-      </div>
-    `;
-  }
-
-  async function main() {
-    if (!type || !['visitor','coworker'].includes(type)) {
-      renderInactive('Missing or invalid type');
-      return;
-    }
-
-    // Build query for /api/get-pass to match your Worker
-    const qs = new URLSearchParams({ type, t: String(Date.now()) });
-    if (id) {
-      qs.set('id', id); // legacy numeric path
-    } else if (type === 'visitor' && visitorName) {
-      qs.set('visitorName', visitorName);
-    } else if (type === 'coworker' && coworkerName) {
-      qs.set('coworkerName', coworkerName);
-    } else {
-      renderInactive('Missing name');
-      return;
-    }
+  (async function () {
+    if (!type || !id) { document.getElementById('card').textContent = 'Missing parameters.'; return; }
 
     try {
-      const res = await fetch(`/api/get-pass?${qs.toString()}`, { cache: 'no-store' });
+      const res = await fetch(`/api/get-pass?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}&t=${Date.now()}`);
       const data = await res.json();
-      if (!res.ok) {
-        console.error('get-pass error', data);
-        renderInactive(data.error || 'Lookup failed');
+      if (!res.ok) throw new Error(data.error || 'Failed to load pass');
+
+      const pass = data.pass; // { name, resource, fromTime, toTime }
+      if (!pass) {
+        document.getElementById('card').innerHTML = `<div class="card"><h3>No Current Booking</h3></div>`;
         return;
       }
 
-      if (type === 'coworker') {
-        const bookings = Array.isArray(data.bookings) ? data.bookings : [];
-        if (!bookings.length) { renderInactive('No Current Booking'); return; }
-
-        // active within ±15 minutes
-        const now = new Date();
-        const active = bookings.find(b => {
-          const s = new Date(b.FromTime), e = new Date(b.ToTime);
-          return now >= new Date(s.getTime() - 15*60000) &&
-                 now <= new Date(e.getTime() + 15*60000);
-        }) || bookings[0];
-
-        // If not within window, still show inactive
-        const inWindow = (() => {
-          const s = new Date(active.FromTime), e = new Date(active.ToTime), n = new Date();
-          return n >= new Date(s.getTime() - 15*60000) && n <= new Date(e.getTime() + 15*60000);
-        })();
-
-        if (inWindow) renderCoworkerActive(active);
-        else renderInactive('No Current Booking');
-        return;
-      }
-
-      // visitor flow expects your Worker to return { visitor, booking }
-      const v = data.visitor;
-      const b = data.booking;
-      if (v && b) {
-        renderVisitorActive(v, b);
-      } else {
-        renderInactive('No Current Visitor Pass');
-      }
+      document.getElementById('card').innerHTML = `
+        <div class="card active">
+          <h3>Garden & Café Pass Active</h3>
+          <h4>Booking Details:</h4>
+          <p><strong>Name:</strong> ${pass.name || 'N/A'}</p>
+          <p><strong>Resource:</strong> ${pass.resource || 'N/A'}</p>
+          <p><strong>Start:</strong> ${pass.fromTime ? fmt(pass.fromTime) : 'N/A'}</p>
+          <p><strong>End:</strong> ${pass.toTime ? fmt(pass.toTime) : 'N/A'}</p>
+          <img src="assets/images/coffee-in-plants.jpeg" alt="Coffee" />
+        </div>
+      `;
     } catch (e) {
       console.error(e);
-      renderInactive('Error loading pass');
+      document.getElementById('card').textContent = 'Error loading pass.';
     }
-  }
-
-  main();
+  })();
 </script>
 </body>
 </html>
-
