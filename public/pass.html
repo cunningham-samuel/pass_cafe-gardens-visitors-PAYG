@@ -6,26 +6,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root{
-      /* Credit card-ish aspect ratio: 85.6mm × 54mm */
-      --card-max-w: 380px;           /* upper bound on large screens */
-      --card-min-w: 300px;           /* lower bound so it doesn't shrink too far */
+      --card-max-w: 380px;     /* upper bound on large screens */
+      --card-min-w: 300px;     /* lower bound so it doesn't shrink too far */
       --radius: 18px;
       --pad: 16px;
     }
 
     html, body { height:100%; margin:0; background:#f5f5f5; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color:#222; }
+    .container { height:100%; display:grid; place-items:center; padding:16px; }
 
-    .container {
-      height:100%;
-      display:grid;
-      place-items:center;
-      padding:16px;
-    }
-
-    /* The “playing card” */
+    /* Playing-card shell */
     .card {
       width: clamp(var(--card-min-w), 92vw, var(--card-max-w));
-      aspect-ratio: 85.6 / 54;
+      aspect-ratio: 85.6 / 54;                /* credit-card-ish */
       box-sizing: border-box;
       border: 1px solid #dcdcdc;
       border-radius: var(--radius);
@@ -34,24 +27,19 @@
       display: grid;
       grid-template-rows: auto 1fr auto;
       box-shadow: 0 6px 20px rgba(0,0,0,.08);
+      text-align: left;
     }
 
-    /* Active/inactive color treatment (subtle so text stays readable) */
     .card.active   { background: #4F615C; color: #fff; border-color:#4F615C; }
     .card.inactive { background: #fff;    color: #222; }
 
-    .section {
-      padding: var(--pad);
-    }
-
+    .section { padding: var(--pad); }
     .title {
       text-align:center;
       font-weight: 700;
       line-height: 1.15;
-      /* scales between 18px and 24px depending on viewport */
       font-size: clamp(18px, 3.6vw, 24px);
     }
-
     .subhead {
       text-align:center;
       margin: 6px 0 8px;
@@ -61,34 +49,18 @@
     }
 
     .row {
-      display:flex;
-      justify-content: space-between;
-      gap: 10px;
+      display:flex; justify-content:space-between; gap:10px;
       margin: 4px 0;
       font-size: clamp(12px, 2.6vw, 15px);
     }
-    .row strong { font-weight: 700; }
-
-    .spacer { height: 6px; }
-
-    /* Image uses remaining height slice, keeps rounded corners inside card */
-    .media {
-      overflow:hidden;
-      border-bottom-left-radius: var(--radius);
-      border-bottom-right-radius: var(--radius);
-    }
-    .media img {
-      width:100%;
-      height: 100%;
-      object-fit: cover;
-      display:block;
-    }
-
-    /* When content gets tall (very long names), let middle section scroll a bit */
+    .row strong { font-weight:700; }
     .details { overflow: hidden; }
     .details-inner { height: 100%; overflow:auto; padding: 0 var(--pad); }
+    .spacer { height: 6px; }
 
-    /* Small devices: gently reduce padding */
+    .media { overflow:hidden; border-bottom-left-radius: var(--radius); border-bottom-right-radius: var(--radius); }
+    .media img { width:100%; height:100%; object-fit:cover; display:block; }
+
     @media (max-width: 420px){
       :root { --pad: 14px; --radius: 16px; }
     }
@@ -104,20 +76,22 @@
 <script>
   const params = new URLSearchParams(location.search);
   const type = params.get('type');   // "visitor" | "coworker"
-  const id   = params.get('id');     // Visitor Id OR Coworker Id
+  const id   = params.get('id');
 
-  const el = (sel) => document.querySelector(sel);
+  const $ = (sel) => document.querySelector(sel);
 
   function fmt(dt) {
+    if (!dt) return 'N/A';
     const d = new Date(dt), pad = n => String(n).padStart(2,'0');
     return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
 
   function renderInactive(msg){
-    el('#card').className = 'card inactive';
-    el('#card').innerHTML = `
+    const card = $('#card');
+    card.className = 'card inactive';
+    card.innerHTML = `
       <div class="section">
-        <div class="title">${msg || 'No Current Pass'}</div>
+        <div class="title">${msg || 'No Current Booking'}</div>
       </div>
       <div class="media">
         <img src="/assets/images/coffee-in-plants.jpeg" alt="Coffee" />
@@ -125,19 +99,20 @@
     `;
   }
 
-  function renderActive({name, resource, start, end}){
-    el('#card').className = 'card active';
-    el('#card').innerHTML = `
+  function renderActive(pass){
+    const card = $('#card');
+    card.className = 'card active';
+    card.innerHTML = `
       <div class="section">
         <div class="title">Garden & Café Pass Active</div>
       </div>
       <div class="details">
         <div class="details-inner">
           <div class="subhead">Booking Details</div>
-          <div class="row"><strong>Name:</strong><span>${name || 'N/A'}</span></div>
-          <div class="row"><strong>Resource:</strong><span>${resource || 'N/A'}</span></div>
-          <div class="row"><strong>Start:</strong><span>${start ? fmt(start) : 'N/A'}</span></div>
-          <div class="row"><strong>End:</strong><span>${end ? fmt(end) : 'N/A'}</span></div>
+          <div class="row"><strong>Name:</strong><span>${pass.name || 'N/A'}</span></div>
+          <div class="row"><strong>Resource:</strong><span>${pass.resource || 'N/A'}</span></div>
+          <div class="row"><strong>Start:</strong><span>${fmt(pass.fromTime)}</span></div>
+          <div class="row"><strong>End:</strong><span>${fmt(pass.toTime)}</span></div>
           <div class="spacer"></div>
         </div>
       </div>
@@ -147,7 +122,7 @@
     `;
   }
 
-  async function main() {
+  (async function () {
     if (!type || !id) { renderInactive('Missing parameters.'); return; }
 
     try {
@@ -155,54 +130,15 @@
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load pass');
 
-      if (type === 'coworker') {
-        const bookings = data.bookings || [];
-        if (!bookings.length) return renderInactive('No Current Booking');
+      const pass = data.pass; // { name, resource, fromTime, toTime }
+      if (!pass) { renderInactive('No Current Booking'); return; }
 
-        const now = new Date();
-        const active = bookings.find(b => {
-          const s = new Date(b.FromTime), e = new Date(b.ToTime);
-          return now >= new Date(s.getTime()-15*60000) && now <= new Date(e.getTime()+15*60000);
-        });
-
-        if (!active) return renderInactive('No Current Booking');
-        return renderActive({
-          name: active.CoworkerFullName,
-          resource: active.ResourceName,
-          start: active.FromTime,
-          end: active.ToTime
-        });
-      }
-
-      // visitor
-      const v = data.visitor;
-      if (!v) return renderInactive('No Visitor Record Found');
-
-      // mark active if ExpectedArrival is today and within +/- 2 hours
-      const now = new Date();
-      const exp = v.ExpectedArrival ? new Date(v.ExpectedArrival) : null;
-      const activeWindow = exp && Math.abs(now - exp) <= 2 * 60 * 60 * 1000;
-
-      if (!activeWindow) return renderInactive('Visitor Pass');
-
-      // Try to extract resource/time from custom fields if present; otherwise show expected only.
-      let resourceName = (v.CustomFields?.Data || []).find(x => x.Name === 'Nexudus.Booking.ResourceName')?.Value || '';
-      const fromTime = (v.CustomFields?.Data || []).find(x => x.Name === 'Nexudus.Booking.FromTime')?.Value || v.ExpectedArrival;
-      // No end time provided for visitors: show +1 hour as a friendly default
-      const endTime = fromTime ? new Date(new Date(fromTime).getTime() + 60*60*1000) : null;
-
-      return renderActive({
-        name: v.FullName || v.VisitorFullName,
-        resource: resourceName,
-        start: fromTime,
-        end: endTime
-      });
+      renderActive(pass);
     } catch (e) {
       console.error(e);
       renderInactive('Error loading pass.');
     }
-  }
-  main();
+  })();
 </script>
 </body>
 </html>
