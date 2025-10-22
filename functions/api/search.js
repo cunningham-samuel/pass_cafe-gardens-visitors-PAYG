@@ -1,68 +1,69 @@
 export async function onRequestGet({ request, env }) {
   try {
-    const url   = new URL(request.url);
-    const type  = (url.searchParams.get('type') || '').toLowerCase();
-    const name  = (url.searchParams.get('name') || '').trim();
-
-    if (!['visitor','coworker'].includes(type) || !name) {
-      return json({ error: 'Missing or invalid type/name' }, 400);
-    }
+    const url  = new URL(request.url);
+    const name = (url.searchParams.get('name') || '').trim();
+    if (!name) return json({ error: 'Missing name' }, 400);
 
     const auth = "Basic " + btoa(`${env.NEXUDUS_API_USERNAME}:${env.NEXUDUS_API_PASSWORD}`);
+    const headers = { Authorization: auth, Accept: 'application/json' };
 
-    if (type === 'visitor') {
-      // today 00:00 → 23:59:59 UTC
-      const now = new Date();
-      const start = new Date(now); start.setUTCHours(0,0,0,0);
-      const end   = new Date(now); end.setUTCHours(23,59,59,999);
-      const iso = d => d.toISOString().split('.')[0] + 'Z';
+    // UTC today window
+    const now = new Date();
+    const start = new Date(now); start.setUTCHours(0,0,0,0);
+    const end   = new Date(now); end.setUTCHours(23,59,59,999);
+    const iso = d => d.toISOString().split('.')[0] + 'Z';
+    const contains = (hay, needle) => String(hay || '').toLowerCase().includes(String(needle).toLowerCase());
 
-      const q = new URLSearchParams({
-        size: '50',
-        Visitor_FullName: name,
-        from_Visitor_ExpectedArrival: iso(start),
-        to_Visitor_ExpectedArrival: iso(end),
-        orderBy: 'ExpectedArrival',
-        dir: 'Ascending',
-      });
+    // --- 1) Today's coworker bookings (to allow instant pass) ---
+    const bParams = new URLSearchParams({
+      page: '1',
+      size: '500',
+      from_Booking_FromTime: iso(start),
+      to_Booking_ToTime: iso(end),
+      status: 'Confirmed'
+    });
+    const bRes = await fetch(`https://spaces.nexudus.com/api/spaces/bookings?${bParams}`, { headers });
+    const bData = bRes.ok ? await bRes.json() : { Records: [] };
+    const bookingMatches = (bData.Records || [])
+      .filter(b => contains(b.CoworkerFullName, name))
+      .map(b => ({
+        type: 'coworker',
+        id: String(b.Booking_Coworker?.Id || b.Booking_Coworker || b.CoworkerId || ''), // best-effort
+        label: b.CoworkerFullName || 'Unknown coworker',
+        sub: `${b.ResourceName || 'Resource'} • ${b.FromTime || ''} → ${b.ToTime || ''}`
+      }))
+      // drop any result that couldn't resolve an id
+      .filter(r => /^\d+$/.test(r.id));
 
-      const api = `https://spaces.nexudus.com/api/spaces/visitors?${q.toString()}`;
-      const r = await fetch(api, { headers: { Authorization: auth, Accept: 'application/json' } });
-      if (!r.ok) return json({ error: 'Visitor search failed', status: r.status }, 502);
-
-      const data = await r.json();
-      const results = (data?.Records || []).map(v => ({
-        id: v.Id,
-        label: `${v.FullName} ${v.VisitorCode ? `(#${v.VisitorCode})` : ''}`,
-        sub: `${v.CoworkerFullName || 'No host'} • Expected ${v.ExpectedArrival ?? 'n/a'}`
+    // --- 2) Today's visitors (ExpectedArrival today) ---
+    // Try server-side filter; fall back to local filter if not supported.
+    let visitorRecords = [];
+    const vParams = new URLSearchParams({
+      page: '1',
+      size: '200',
+      from_Visitor_ExpectedArrival: iso(start),
+      to_Visitor_ExpectedArrival: iso(end)
+    });
+    const vUrl = `https://spaces.nexudus.com/api/spaces/visitors?${vParams}`;
+    const vRes = await fetch(vUrl, { headers });
+    if (vRes.ok) {
+      const vData = await vRes.json();
+      visitorRecords = Array.isArray(vData.Records) ? vData.Records : [];
+    }
+    const visitorMatches = visitorRecords
+      .filter(v => contains(v.FullName, name))
+      .map(v => ({
+        type: 'visitor',
+        id: String(v.Id),
+        label: v.FullName,
+        sub: `${v.CoworkerFullName || 'No host'} • Expected ${v.ExpectedArrival || 'n/a'}`
       }));
 
-      return json({ results });
-    }
-
-    // coworker
-    {
-      const q = new URLSearchParams({
-        size: '50',
-        Coworker_FullName: name, // Nexudus supports this filter
-        orderBy: 'FullName',
-        dir: 'Ascending',
-      });
-      const api = `https://spaces.nexudus.com/api/spaces/coworkers?${q.toString()}`;
-      const r = await fetch(api, { headers: { Authorization: auth, Accept: 'application/json' } });
-      if (!r.ok) return json({ error: 'Coworker search failed', status: r.status }, 502);
-
-      const data = await r.json();
-      const results = (data?.Records || []).map(cw => ({
-        id: cw.Id,
-        label: cw.FullName || cw.BillingName || `Coworker ${cw.Id}`,
-        sub: cw.Email || ''
-      }));
-
-      return json({ results });
-    }
+    // Merge, prefer upcoming first
+    const results = [...bookingMatches, ...visitorMatches];
+    return json({ results });
   } catch (e) {
-    return json({ error: 'Server error', detail: String(e).slice(0,200) }, 500);
+    return json({ error: 'Server error', detail: String(e).slice(0, 200) }, 500);
   }
 }
 
