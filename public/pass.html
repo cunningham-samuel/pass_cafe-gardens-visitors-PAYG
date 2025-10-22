@@ -6,152 +6,177 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root{
-      --card-max-w: 380px;
-      --card-min-w: 300px;
-      --radius: 18px;
-      --pad: 16px;
+      --brand:#4F615C;
+      --ink:#222;
+      --paper:#fff;
+      --muted:#666;
+      --border:#d9d9d9;
+      --radius:18px;
+      --shadow:0 8px 30px rgba(0,0,0,.10);
+      --pad:16px;
+      --card-max:420px;  /* ~playing-card width on larger screens */
+      --card-min:280px;  /* comfortable minimum on small phones   */
     }
-    html, body { height:100%; margin:0; background:#f5f5f5; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
-    .container { height:100%; display:grid; place-items:center; padding:16px; }
+
+    /* page canvas */
+    html, body { height:100%; margin:0; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background:#f5f5f5;
+      color:var(--ink);
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+    }
+    .canvas {
+      min-height:100vh;
+      display:grid;
+      place-items:center;
+      padding:24px;
+    }
+
+    /* card */
     .card {
-      width: clamp(var(--card-min-w), 92vw, var(--card-max-w));
-      aspect-ratio: 85.6 / 54;
-      border: 1px solid #dcdcdc;
-      border-radius: var(--radius);
-      background: #fff;
-      overflow: hidden;
-      display: grid;
-      grid-template-rows: auto 1fr auto;
-      box-shadow: 0 6px 20px rgba(0,0,0,.08);
-      text-align: left;
+      width:clamp(var(--card-min), 86vw, var(--card-max));
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      padding:calc(var(--pad) * 1.25);
+      box-shadow:var(--shadow);
+      box-sizing:border-box;
+      text-align:center;
+      background:var(--paper);
     }
-    .card.active   { background: #4F615C; color: #fff; border-color:#4F615C; }
-    .card.inactive { background: #fff; color: #222; }
-    .section { padding: var(--pad); }
-    .title   { text-align:center; font-weight:700; line-height:1.15; font-size: clamp(18px, 3.6vw, 24px); }
-    .subhead { text-align:center; margin: 6px 0 10px; font-weight:600; font-size: clamp(13px, 2.8vw, 16px); }
-    .row { display:flex; justify-content:space-between; gap:10px; margin: 6px 0; font-size: clamp(12px, 2.6vw, 15px); }
-    .row strong { font-weight:700; }
-    .details { overflow: hidden; }
-    .details-inner { height: 100%; overflow:auto; padding: 0 var(--pad); }
-    .media { overflow:hidden; border-bottom-left-radius: var(--radius); border-bottom-right-radius: var(--radius); }
-    .media img { width:100%; height:100%; object-fit:cover; display:block; }
+    .card.active {
+      background:var(--brand);
+      border-color:var(--brand);
+      color:#fff;
+    }
+
+    /* typography scales across devices without getting silly */
+    h3 {
+      margin:.25rem 0 .5rem;
+      font-weight:800;
+      font-size:clamp(20px, 4.8vw, 28px);
+      line-height:1.15;
+    }
+    h4 {
+      margin:.5rem 0 .25rem;
+      font-weight:700;
+      font-size:clamp(16px, 3.8vw, 20px);
+      line-height:1.2;
+      opacity:.95;
+    }
+    p {
+      margin:.25rem 0;
+      font-size:clamp(14px, 3.6vw, 18px);
+      line-height:1.35;
+    }
+    .muted { color:var(--muted); }
+
+    /* image keeps its corners and never blows past the card */
+    .hero {
+      display:block;
+      width:100%;
+      height:auto;
+      max-height:260px;         /* keep a balanced card ratio */
+      object-fit:cover;
+      border-radius:12px;
+      margin-top:14px;
+    }
+
+    /* tighten vertical rhythm on very small phones */
+    @media (max-width:380px){
+      .card{ padding:var(--pad); }
+    }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div id="card" class="card" aria-busy="true">
-      <div class="section"><div class="title">Loading your pass…</div></div>
-    </div>
+  <div class="canvas">
+    <div id="card">Loading your pass…</div>
   </div>
 
 <script>
   const params = new URLSearchParams(location.search);
   const type = params.get('type');   // "visitor" | "coworker"
-  const id   = params.get('id');
-
-  const $ = sel => document.querySelector(sel);
+  const id   = params.get('id');     // Visitor Id OR Coworker Id
 
   function fmt(dt) {
-    if (!dt) return 'N/A';
     const d = new Date(dt), pad = n => String(n).padStart(2,'0');
     return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
 
-  function normalizePass(input) {
-    // Accept your unified 'pass' or a raw booking/visitor object
-    if (!input) return null;
-
-    // If API returned { pass: {...} } already
-    const p = ('name' in input || 'resource' in input || 'fromTime' in input || 'toTime' in input)
-      ? input
-      : input; // fallback: use input directly
-
-    const name =
-      p.name ??
-      p.CoworkerFullName ??
-      p.FullName ??
-      null;
-
-    const resource =
-      p.resource ??
-      p.ResourceName ??
-      (p.CustomFields?.Data?.find?.(x => x.Name === 'Nexudus.Booking.ResourceName')?.Value) ??
-      null;
-
-    const fromTime =
-      p.fromTime ??
-      p.FromTime ??
-      (p.CustomFields?.Data?.find?.(x => x.Name === 'Nexudus.Booking.FromTime')?.Value) ??
-      null;
-
-    const toTime =
-      p.toTime ??
-      p.ToTime ??
-      null;
-
-    return { name, resource, fromTime, toTime };
-  }
-
-  function renderInactive(msg){
-    const card = $('#card');
-    card.className = 'card inactive';
-    card.innerHTML = `
-      <div class="section">
-        <div class="title">${msg || 'No Current Booking'}</div>
-      </div>
-      <div class="media">
-        <img src="/assets/images/coffee-in-plants.jpeg" alt="Coffee" />
-      </div>
-    `;
-  }
-
-  function renderActive(pass){
-    const card = $('#card');
-    card.className = 'card active';
-    card.innerHTML = `
-      <div class="section">
-        <div class="title">Garden & Café Pass Active</div>
-      </div>
-      <div class="details">
-        <div class="details-inner">
-          <div class="subhead">Booking Details:</div>
-          <div class="row"><strong>Name:</strong><span>${pass.name || 'N/A'}</span></div>
-          <div class="row"><strong>Resource:</strong><span>${pass.resource || 'N/A'}</span></div>
-          <div class="row"><strong>Start:</strong><span>${fmt(pass.fromTime)}</span></div>
-          <div class="row"><strong>End:</strong><span>${fmt(pass.toTime)}</span></div>
-        </div>
-      </div>
-      <div class="media">
-        <img src="/assets/images/coffee-in-plants.jpeg" alt="Coffee" />
-      </div>
-    `;
-  }
-
-  (async function () {
-    if (!type || !id) { renderInactive('Missing parameters.'); return; }
+  async function main() {
+    if (!type || !id) { document.getElementById('card').textContent = 'Missing parameters.'; return; }
 
     try {
       const res = await fetch(`/api/get-pass?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}&t=${Date.now()}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load pass');
 
-      // Prefer unified pass, otherwise try bookings[0]/visitor etc.
-      let raw =
-        data.pass ??
-        (Array.isArray(data.bookings) && data.bookings[0]) ??
-        data.visitor ??
-        null;
+      if (type === 'coworker') {
+        const bookings = data.bookings || [];
+        if (!bookings.length) {
+          document.getElementById('card').innerHTML = `<div class="card"><h3>No Current Booking</h3></div>`;
+          return;
+        }
+        // active within +/- 15 minutes
+        const now = new Date();
+        const active = bookings.find(b => {
+          const s = new Date(b.FromTime), e = new Date(b.ToTime);
+          return now >= new Date(s.getTime()-15*60000) && now <= new Date(e.getTime()+15*60000);
+        });
+        if (active) {
+          document.getElementById('card').innerHTML = `
+            <div class="card active">
+              <h3>Garden & Café Pass Active</h3>
+              <h4>Booking Details:</h4>
+              <p><strong>Name:</strong> ${active.CoworkerFullName || 'N/A'}</p>
+              <p><strong>Resource:</strong> ${active.ResourceName || 'N/A'}</p>
+              <p><strong>Start:</strong> ${fmt(active.FromTime)}</p>
+              <p><strong>End:</strong> ${fmt(active.ToTime)}</p>
+              <img class="hero" src="assets/images/coffee-in-plants.jpeg" alt="Coffee" />
+            </div>
+          `;
+        } else {
+          document.getElementById('card').innerHTML = `<div class="card"><h3>No Current Booking</h3></div>`;
+        }
+        return;
+      }
 
-      const pass = normalizePass(raw);
-      if (!pass) { renderInactive('No Current Booking'); return; }
+      // visitor
+      const v = data.visitor;
+      if (!v) {
+        document.getElementById('card').innerHTML = `<div class="card"><h3>No Visitor Record Found</h3></div>`;
+        return;
+      }
+      // Active if expected arrival is today and within ±2h
+      const now = new Date();
+      const exp = v.ExpectedArrival ? new Date(v.ExpectedArrival) : null;
+      const isToday = exp && exp.toDateString() === now.toDateString();
+      const active = exp && (Math.abs(now - exp) <= 2 * 60 * 60 * 1000);
 
-      renderActive(pass);
+      // Try to surface any booking details present in CustomFields (if provided)
+      const cf = (v.CustomFields && Array.isArray(v.CustomFields.Data)) ? v.CustomFields.Data : [];
+      const resource = (cf.find(x => x.Name === 'Nexudus.Booking.ResourceName') || {}).Value || 'N/A';
+      const startTime = (cf.find(x => x.Name === 'Nexudus.Booking.FromTime') || {}).Value || v.ExpectedArrival;
+
+      document.getElementById('card').innerHTML = `
+        <div class="card ${active ? 'active' : ''}">
+          <h3>Garden & Café Pass Active</h3>
+          <h4>Booking Details:</h4>
+          <p><strong>Name:</strong> ${v.FullName || 'N/A'}</p>
+          <p><strong>Resource:</strong> ${resource}</p>
+          ${startTime ? `<p><strong>Start:</strong> ${fmt(startTime)}</p>` : ''}
+          ${v.ArrivalDate ? `<p><strong>End:</strong> ${fmt(v.ArrivalDate)}</p>` : ''}
+          ${!active ? `<p class="muted">Pass not currently active</p>` : ''}
+          <img class="hero" src="assets/images/coffee-in-plants.jpeg" alt="Coffee" />
+        </div>
+      `;
     } catch (e) {
       console.error(e);
-      renderInactive('Error loading pass.');
+      document.getElementById('card').textContent = 'Error loading pass.';
     }
-  })();
+  }
+  main();
 </script>
 </body>
 </html>
