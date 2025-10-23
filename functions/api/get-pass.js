@@ -1,49 +1,60 @@
 export async function onRequestGet({ request, env }) {
   try {
-    const url = new URL(request.url);
+    const url  = new URL(request.url);
     const type = (url.searchParams.get('type') || '').toLowerCase(); // 'visitor' | 'coworker'
     const id   = url.searchParams.get('id');
 
     if (!['visitor','coworker'].includes(type) || !id) {
       return json({ error: 'Missing or invalid type/id' }, 400);
     }
+    if (!/^\d+$/.test(id)) {
+      return json({ error: 'id must be numeric' }, 400);
+    }
 
-    const auth = "Basic " + btoa(`${env.NEXUDUS_API_USERNAME}:${env.NEXUDUS_API_PASSWORD}`);
+    const auth    = "Basic " + btoa(`${env.NEXUDUS_API_USERNAME}:${env.NEXUDUS_API_PASSWORD}`);
     const headers = { Authorization: auth, Accept: 'application/json' };
 
-    // UTC today
-    const now = new Date();
-    const start = new Date(now); start.setUTCHours(0,0,0,0);
-    const end   = new Date(now); end.setUTCHours(23,59,59,999);
-    const iso = d => d.toISOString().split('.')[0] + 'Z';
+    // ---- time helpers (UTC "minute" precision, as Nexudus expects) ----
+    const now   = new Date();
+    const start = new Date(now); start.setUTCHours(0, 0, 0, 0);
+    const end   = new Date(now); end.setUTCHours(23, 59, 59, 999);
+
+    const isoMinute = (d) => {
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+    };
+
     const isActive = (from, to, padMin = 15) => {
       const s = new Date(from), e = new Date(to);
       return now >= new Date(s.getTime() - padMin*60000) && now <= new Date(e.getTime() + padMin*60000);
     };
 
-    // Fetch all today's bookings once (used by both flows)
+    // ---- fetch today's bookings once (used by both flows) ----
     const bookingsUrl = `https://spaces.nexudus.com/api/spaces/bookings?` +
       new URLSearchParams({
-        page: '1', size: '500', status: 'Confirmed',
-        from_Booking_FromTime: iso(start),
-        to_Booking_ToTime: iso(end)
+        page: '1',
+        size: '500',
+        status: 'Confirmed',
+        from_Booking_FromTime: isoMinute(start),
+        to_Booking_ToTime: isoMinute(end),
       });
+
     const bRes = await fetch(bookingsUrl, { headers });
     const allBookings = bRes.ok ? (await bRes.json())?.Records || [] : [];
 
-    // ---- Coworker flow (id = coworkerId) ----
+    // ---------- COWORKER FLOW ----------
     if (type === 'coworker') {
-      if (!/^\d+$/.test(id)) return json({ error: 'coworker id must be numeric' }, 400);
       const mine = allBookings.filter(b =>
-        String(b.Booking_Coworker?.Id || b.Booking_Coworker || b.CoworkerId || '') === String(id)
+        String(b.Booking_Coworker?.Id || b.CoworkerId || b.Coworker?.Id || '') === String(id)
       );
 
-      // choose active if any, otherwise the latest ending booking today
       const active = mine.find(b => isActive(b.FromTime, b.ToTime));
-      const chosen = active || mine.sort((a,b)=>new Date(b.ToTime)-new Date(a.ToTime))[0];
-      if (!chosen) return json({ pass: null });
+      const chosen = active || mine.sort((a,b)=> new Date(b.ToTime) - new Date(a.ToTime))[0];
+
+      if (!chosen) return json({ source: 'none', pass: null });
 
       return json({
+        source: 'booking',
         pass: {
           name: chosen.CoworkerFullName || 'N/A',
           resource: chosen.ResourceName || 'N/A',
@@ -53,56 +64,69 @@ export async function onRequestGet({ request, env }) {
       });
     }
 
-    // ---- Visitor flow (id = visitorId) ----
-    if (!/^\d+$/.test(id)) return json({ error: 'visitor id must be numeric' }, 400);
-
-    // Get the visitor record
+    // ---------- VISITOR FLOW ----------
+    // 1) get the visitor record (mostly to confirm the name / id)
     const vRes = await fetch(`https://spaces.nexudus.com/api/spaces/visitors/${encodeURIComponent(id)}`, { headers });
     if (!vRes.ok) return json({ error: 'Visitor fetch failed', status: vRes.status }, 502);
     const v = await vRes.json();
+    const visitorName = String(v.FullName || '').trim().toLowerCase();
 
-    // Try to associate to a booking via /spaces/bookingvisitors (then match by BookingId)
-    let bvRecords = [];
-    const bvUrl = `https://spaces.nexudus.com/api/spaces/bookingvisitors?` +
-      new URLSearchParams({ page: '1', size: '200' });
-    const bvRes = await fetch(bvUrl, { headers });
-    if (bvRes.ok) {
-      const data = await bvRes.json();
-      const all = Array.isArray(data?.Records) ? data.Records : [];
-      // best-effort match by VisitorId or VisitorFullName
-      const needle = String(v.FullName || '').toLowerCase();
-      bvRecords = all.filter(x =>
-        String(x.VisitorId || '').trim() === String(v.Id) ||
-        String(x.VisitorFullName || '').toLowerCase() === needle
-      );
+    // 2) page through /bookingvisitors and collect any rows that refer to this visitor
+    const bookingIdSet = new Set();
+
+    // helper to fetch paginated endpoints
+    async function fetchPage(baseUrl, page, size = 200) {
+      const u = `${baseUrl}?${new URLSearchParams({ page: String(page), size: String(size) })}`;
+      const r = await fetch(u, { headers });
+      if (!r.ok) return null;
+      return r.json();
     }
 
-    // Cross-match with today's bookings
-    const bookingIdSet = new Set(bvRecords.map(x => x.BookingId).filter(Boolean));
+    const baseBV = `https://spaces.nexudus.com/api/spaces/bookingvisitors`;
+    // cap at 10 pages defensively
+    for (let page = 1; page <= 10; page++) {
+      const data = await fetchPage(baseBV, page, 200);
+      if (!data) break;
+      const rows = Array.isArray(data.Records) ? data.Records : [];
+
+      for (const row of rows) {
+        const sameId   = String(row.VisitorId || '') === String(id);
+        const sameName = String(row.VisitorFullName || '').trim().toLowerCase() === visitorName;
+        if (sameId || sameName) {
+          if (row.BookingId) bookingIdSet.add(row.BookingId);
+        }
+      }
+      if (!data.HasNextPage) break;
+    }
+
+    // 3) cross-match to today’s bookings
     const candidates = allBookings.filter(b => bookingIdSet.has(b.Id));
+    const active     = candidates.find(b => isActive(b.FromTime, b.ToTime));
+    const chosen     = active || candidates.sort((a,b)=> new Date(b.ToTime) - new Date(a.ToTime))[0];
 
-    // choose active if any, otherwise the latest ending booking today
-    let chosen = candidates.find(b => isActive(b.FromTime, b.ToTime));
-    if (!chosen) chosen = candidates.sort((a,b)=>new Date(b.ToTime)-new Date(a.ToTime))[0];
-
-    // As a fallback (no linked booking), try to display something using visitor clues
-    if (!chosen) {
+    if (chosen) {
       return json({
+        source: 'booking',
         pass: {
           name: v.FullName || 'Visitor',
-          resource: v?.CustomFields?.Data?.find(d => d.Name === 'Nexudus.Booking.ResourceName')?.Value || 'N/A',
-          fromTime: v?.CustomFields?.Data?.find(d => d.Name === 'Nexudus.Booking.FromTime')?.Value || v.ExpectedArrival || null,
-          toTime: null
+          resource: chosen.ResourceName || 'N/A',
+          fromTime: chosen.FromTime || null,
+          toTime: chosen.ToTime || null
         }
       });
     }
 
+    // 4) fallback — no linked booking found; show minimal visitor info
     return json({
+      source: 'visitor-fallback',
       pass: {
         name: v.FullName || 'Visitor',
-        resource: chosen.ResourceName || 'N/A',
-        fromTime: chosen.FromTime || null,
-        toTime: chosen.ToTime || null
+        resource:
+          v?.CustomFields?.Data?.find(d => d.Name === 'Nexudus.Booking.ResourceName')?.Value || 'N/A',
+        fromTime:
+          v?.CustomFields?.Data?.find(d => d.Name === 'Nexudus.Booking.FromTime')?.Value ||
+          v.ExpectedArrival || null,
+        toTime: null
       }
     });
   } catch (e) {
