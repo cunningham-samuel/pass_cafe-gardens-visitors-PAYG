@@ -16,7 +16,7 @@
     .results { margin-top: 1rem; }
     .card { border:1px solid #e3e3e3; border-radius:12px; padding:.75rem 1rem; margin:.5rem 0; display:flex; justify-content:space-between; align-items:center; }
     .muted { color:#666; font-size:.9rem; }
-    .small { font-size:.85rem; }
+    .badge { font-size:.8rem; padding:.15rem .4rem; border-radius:6px; background:#eef2f1; color:#2f3d39; margin-left:.35rem; }
   </style>
 </head>
 <body>
@@ -37,7 +37,10 @@
 <script>
   const $ = sel => document.querySelector(sel);
 
-  $('#search').addEventListener('click', async () => {
+  $('#search').addEventListener('click', run);
+  $('#name').addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
+
+  async function run(){
     const name = $('#name').value.trim();
     $('#msg').textContent = '';
     $('#results').innerHTML = '';
@@ -48,7 +51,7 @@
     $('#msg').textContent = 'Searching…';
 
     try {
-      const res = await fetch(`/api/search?name=${encodeURIComponent(name)}`);
+      const res = await fetch(`/api/search?name=${encodeURIComponent(name)}&t=${Date.now()}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Search failed');
 
@@ -63,13 +66,12 @@
         div.className = 'card';
         div.innerHTML = `
           <div>
-            <div><strong>${r.label}</strong></div>
-            <div class="muted small">${r.sub || ''}</div>
+            <div><strong>${r.label}</strong><span class="badge">${r.type}</span></div>
+            <div class="muted">${r.sub || ''}</div>
           </div>
           <button data-id="${r.id}" data-type="${r.type}">Select</button>
         `;
         div.querySelector('button').addEventListener('click', () => {
-          // Send to pass page with resolved type & id
           window.location.href = `/pass.html?type=${encodeURIComponent(r.type)}&id=${encodeURIComponent(r.id)}`;
         });
         $('#results').appendChild(div);
@@ -80,7 +82,8 @@
     } finally {
       $('#search').disabled = false;
     }
-  });
+  }
 </script>
 </body>
 </html>
+
