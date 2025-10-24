@@ -19,6 +19,28 @@ export async function onRequestGet({ request, env }) {
 
     const needle = name.toLowerCase();
 
+    // UK formatter -> "YYYY-MM-DD HH:MM" in Europe/London
+    const formatUK = (dt) => {
+      const d = new Date(dt);
+      if (Number.isNaN(d.getTime())) return 'n/a';
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Europe/London',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      }).formatToParts(d);
+      const get = (t) => parts.find(p => p.type === t)?.value || '';
+      const dd = get('day');
+      const mm = get('month');
+      const yyyy = get('year');
+      const hh = get('hour');
+      const min = get('minute');
+      return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+    };
+
     // ---- visitors (today) ----
     const vParams = new URLSearchParams({
       page: '1',
@@ -58,7 +80,7 @@ export async function onRequestGet({ request, env }) {
       type: 'visitor',
       id: v.Id,
       label: v.FullName || `Visitor ${v.Id}`,
-      sub: `Expected ${v.ExpectedArrival ?? 'n/a'}${v.CoworkerFullName ? ' • Host ' + v.CoworkerFullName : ''}`
+      sub: `Expected ${v?.ExpectedArrival ? formatUK(v.ExpectedArrival) : 'n/a'}${v.CoworkerFullName ? ' • Host ' + v.CoworkerFullName : ''}`
     }));
     const coworkerResults = cRecords.map(cw => ({
       type: 'coworker',
@@ -76,5 +98,4 @@ export async function onRequestGet({ request, env }) {
 function json(obj, status = 200) {
   return new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json' } });
 }
-
 
