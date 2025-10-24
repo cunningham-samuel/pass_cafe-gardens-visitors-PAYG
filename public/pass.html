@@ -6,51 +6,60 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root{
-      --brand:#4F615C;
-      --radius:20px;
-    }
+  --brand:#4F615C;
+  --radius:20px;
+}
 
-    html, body { height:100%; margin:0; background:#f5f5f5; font-family: Arial, sans-serif; }
-    body { min-height:100dvh; }
-    .container {
-      min-height:100dvh;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      padding:24px;
-    }
+/* page frame */
+html, body { height:100%; margin:0; background:#f5f5f5; font-family: Arial, sans-serif; }
+body { min-height:100dvh; }
+.container{
+  min-height:100dvh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  /* fluid padding: tight on phones, comfy on big screens */
+  padding: clamp(8px, 3vw, 24px);
+}
 
-    .card{
-      width:100%;
-      max-width:480px;            /* slightly narrower */
-      border:1px solid #ddd;
-      border-radius:var(--radius);
-      padding:24px;
-      box-sizing:border-box;
-      text-align:center;
-      background:#fff;
-      box-shadow:0 10px 30px rgba(0,0,0,.08);
-    }
-    .active{
-      background:var(--brand);
-      border-color:var(--brand);
-      color:#fff;
-    }
+/* PASS CARD */
+.card{
+  width: 100%;
+  /* slightly wider cap but still reasonable on desktop */
+  max-width: 560px;
+  border:1px solid #ddd;
+  border-radius:var(--radius);
+  padding:24px;
+  box-sizing:border-box;
+  text-align:center;
+  background:#fff;
+  box-shadow:0 10px 30px rgba(0,0,0,.08);
+}
+.active{
+  background:var(--brand);
+  border-color:var(--brand);
+  color:#fff;
+}
 
-    h3{ font-size: clamp(26px, 6vw, 40px); margin: 8px 0 10px; line-height:1.2; }
-    h4{ font-size: clamp(18px, 4vw, 24px); margin: 14px 0 10px; }
-    p { font-size: clamp(16px, 3.5vw, 22px); margin: 10px 0; }
+/* fluid type */
+h3{ font-size: clamp(26px, 6vw, 40px); margin: 8px 0 10px; line-height:1.2; }
+h4{ font-size: clamp(18px, 4vw, 24px); margin: 14px 0 10px; }
+p  { font-size: clamp(16px, 3.5vw, 22px); margin: 10px 0; }
 
-    img{
-      width:100%;
-      max-height:40vh;
-      object-fit:cover;
-      border-radius: calc(var(--radius) - 6px);
-      margin-top:18px;
-      display:block;
-    }
+/* image */
+img{
+  width:100%;
+  max-height:40vh;
+  object-fit:cover;
+  border-radius: calc(var(--radius) - 6px);
+  margin-top:18px;
+  display:block;
+}
 
-    .note { font-size:12px; opacity:.85; margin-top:6px; }
+/* on very narrow phones, trim inner padding a bit more */
+@media (max-width: 360px){
+  .card{ padding: 18px; }
+}
   </style>
 </head>
 <body>
