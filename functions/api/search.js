@@ -17,6 +17,13 @@ export async function onRequestGet({ request, env }) {
       return `${d.getUTCFullYear()}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
     };
 
+    // Added: ISO without ms + active-window helper
+    const isoNoMs = (d) => d.toISOString().split('.')[0] + 'Z';
+    const isActive = (from, to, padMin = 15) => {
+      const s = new Date(from), e = new Date(to);
+      return now >= new Date(s.getTime() - padMin*60000) && now <= new Date(e.getTime() + padMin*60000);
+    };
+
     const needle = name.toLowerCase();
 
     // UK formatter -> "YYYY-MM-DD HH:MM" in Europe/London
@@ -41,6 +48,19 @@ export async function onRequestGet({ request, env }) {
       return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
     };
 
+    // ---- fetch today's confirmed bookings once (used for both visitors & coworkers) ----
+    const bookingsUrl = `https://spaces.nexudus.com/api/spaces/bookings?` +
+      new URLSearchParams({
+        page: '1',
+        size: '500',
+        status: 'Confirmed',
+        from_Booking_FromTime: isoNoMs(start),
+        to_Booking_ToTime: isoNoMs(end)
+      });
+    const bRes = await fetch(bookingsUrl, { headers });
+    const allBookings = bRes.ok ? ((await bRes.json())?.Records || []) : [];
+    const bookingById = new Map(allBookings.map(b => [String(b.Id), b]));
+
     // ---- visitors (today) ----
     const vParams = new URLSearchParams({
       page: '1',
@@ -60,6 +80,36 @@ export async function onRequestGet({ request, env }) {
     }
     vRecords = vRecords.filter(v => String(v.FullName||'').toLowerCase().includes(needle));
 
+    // For each visitor: look up bookingvisitors & keep only active bookings
+    const visitorResults = [];
+    for (const v of vRecords) {
+      const bvParams = new URLSearchParams({
+        page: '1',
+        size: '100',
+        BookingVisitor_Visitor: String(v.Id)
+      });
+      const bvUrl = `https://spaces.nexudus.com/api/spaces/bookingvisitors?${bvParams.toString()}`;
+      const bvr = await fetch(bvUrl, { headers });
+      if (!bvr.ok) continue;
+
+      const bvData = await bvr.json();
+      const linked = (Array.isArray(bvData?.Records) ? bvData.Records : [])
+        .map(x => bookingById.get(String(x.BookingId)))
+        .filter(Boolean);
+
+      const active = linked.filter(b => b.FromTime && b.ToTime && isActive(b.FromTime, b.ToTime));
+      if (!active.length) continue;
+
+      const chosen = active.sort((a,b)=> new Date(b.ToTime) - new Date(a.ToTime))[0];
+
+      visitorResults.push({
+        type: 'visitor',
+        id: v.Id,
+        label: v.FullName || `Visitor ${v.Id}`,
+        sub: `From ${formatUK(chosen.FromTime)} to ${formatUK(chosen.ToTime)}${chosen.ResourceName ? ' • ' + chosen.ResourceName : ''}`
+      });
+    }
+
     // ---- coworkers (name search) ----
     const cParams = new URLSearchParams({
       page: '1',
@@ -76,18 +126,25 @@ export async function onRequestGet({ request, env }) {
     }
     cRecords = cRecords.filter(cw => String(cw.FullName||'').toLowerCase().includes(needle));
 
-    const visitorResults = vRecords.map(v => ({
-      type: 'visitor',
-      id: v.Id,
-      label: v.FullName || `Visitor ${v.Id}`,
-      sub: `Expected ${v?.ExpectedArrival ? formatUK(v.ExpectedArrival) : 'n/a'}${v.CoworkerFullName ? ' • Host ' + v.CoworkerFullName : ''}`
-    }));
-    const coworkerResults = cRecords.map(cw => ({
-      type: 'coworker',
-      id: cw.Id,
-      label: cw.FullName || cw.BillingName || `Coworker ${cw.Id}`,
-      sub: cw.Email || ''
-    }));
+    // Only return coworkers with an active booking now
+    const coworkerResults = [];
+    for (const cw of cRecords) {
+      const myBookings = allBookings.filter(b => {
+        const bid = String(b.Booking_Coworker?.Id || b.CoworkerId || '');
+        return bid === String(cw.Id);
+      });
+      const active = myBookings.filter(b => b.FromTime && b.ToTime && isActive(b.FromTime, b.ToTime));
+      if (!active.length) continue;
+
+      const chosen = active.sort((a,b)=> new Date(b.ToTime) - new Date(a.ToTime))[0];
+
+      coworkerResults.push({
+        type: 'coworker',
+        id: cw.Id,
+        label: cw.FullName || cw.BillingName || `Coworker ${cw.Id}`,
+        sub: `From ${formatUK(chosen.FromTime)} to ${formatUK(chosen.ToTime)}${chosen.ResourceName ? ' • ' + chosen.ResourceName : ''}`
+      });
+    }
 
     return json({ results: [...visitorResults, ...coworkerResults].slice(0, 50) });
   } catch (e) {
@@ -98,4 +155,5 @@ export async function onRequestGet({ request, env }) {
 function json(obj, status = 200) {
   return new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json' } });
 }
+
 
